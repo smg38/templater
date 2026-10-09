@@ -1,0 +1,464 @@
+#!/usr/bin/env bash
+# templater.sh
+# Подставляет {{ VAR }} (с фильтрами) из переменных окружения в шаблон.
+# Поддерживает циклы {% for VAR in LIST %} ... {% endfor %}.
+#
+# Поведение по умолчанию:
+#   templater.sh file.j3
+#     → читает переменные из file.env (если есть)
+#     → пишет результат в file.out
+#
+# Явные -e / -o переопределяют автопоиск.
+#
+# v 3.3.0
+
+set -euo pipefail
+
+progname=${0##*/}
+
+usage() {
+    cat >&2 <<EOF
+Usage: VAR=value $progname [-e ENVFILE] [-o OUTPUT] [-s] TEMPLATE
+       VAR=value $progname [-e ENVFILE] [-o OUTPUT] [-s] -
+
+Behavior:
+  If TEMPLATE is 'file.j3' and no -e is given, variables are loaded
+  from 'file.env' (if it exists).
+  If TEMPLATE is 'file.j3' and no -o is given, output is written to
+  'file.out' (extension replaced).
+
+Options:
+  -e ENVFILE  загрузить переменные из ENVFILE
+  -o OUTPUT   записать результат в OUTPUT
+  -s          strict: ошибка на неопределённую переменную без default
+  -h          справка
+
+Filters:
+  default('V'), b64encode, b64decode, upper, lower, trim, quote,
+  urlencode, sha256, md5, hexdump, replace('A','B'),
+  substr(N), substr(N,M), indent(N)
+
+Loops:
+  {% for VAR in LIST %}
+    ...{{ VAR }}...{{ OTHER }}...
+  {% endfor %}
+  LIST — переменная окружения; элементы разделены пробелами,
+  табами или переводами каретки (один или несколько).
+  Внутри тела доступны все переменные и фильтры.
+EOF
+    exit 1
+}
+
+strict=0
+outfile=""
+outfile_given=0
+envfile=""
+envfile_given=0
+template=""
+
+while getopts ":e:o:sh" opt; do
+    case $opt in
+        e) envfile=$OPTARG; envfile_given=1 ;;
+        o) outfile=$OPTARG; outfile_given=1 ;;
+        s) strict=1 ;;
+        h) usage ;;
+        \?) echo "$progname: неизвестная опция -$OPTARG" >&2; usage ;;
+        :)  echo "$progname: опция -$OPTARG требует аргумент" >&2; usage ;;
+    esac
+done
+shift $((OPTIND-1))
+
+[[ $# -eq 1 ]] || usage
+template=$1
+
+# --- автопоиск .env / .out ---
+if [[ "$template" != "-" ]]; then
+    dir=$(dirname -- "$template")
+    base=$(basename -- "$template")
+    stem=${base%.*}                 # file.j3 -> file; config.yaml.j3 -> config.yaml
+    [[ "$stem" == "$base" ]] && stem=$base
+
+    if (( ! envfile_given )); then
+        auto_env="$dir/$stem.env"
+        [[ -f "$auto_env" ]] && envfile=$auto_env
+    fi
+
+    if (( ! outfile_given )); then
+        outfile="$dir/$stem.out"
+    fi
+fi
+
+# --- загрузка .env ---
+if [[ -n "$envfile" ]]; then
+    if [[ ! -f "$envfile" ]]; then
+        echo "$progname: env-файл '$envfile' не найден" >&2
+        exit 1
+    fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line=${line%$'\r'}
+        # пустые строки
+        [[ -z "${line//[[:space:]]/}" ]] && continue
+        # строки-комментарии
+        [[ "${line#"${line%%[![:space:]]*}"}" == \#* ]] && continue
+
+        if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$ ]]; then
+            key=${BASH_REMATCH[1]}
+            val=${BASH_REMATCH[2]}
+            # ltrim значения
+            val=${val#"${val%%[![:space:]]*}"}
+
+            if [[ "$val" =~ ^\'(.*)\'$ ]]; then
+                val=${BASH_REMATCH[1]}
+            elif [[ "$val" =~ ^\"(.*)\"$ ]]; then
+                val=${BASH_REMATCH[1]}
+                val=${val//\\n/$'\n'}
+                val=${val//\\t/$'\t'}
+                val=${val//\\\"/\"}
+                val=${val//\\\\/\\}
+            else
+                if [[ "$val" =~ ^(.*[^[:space:]])[[:space:]]+#.*$ ]]; then
+                    val=${BASH_REMATCH[1]}
+                elif [[ "$val" =~ ^([^[:space:]]+)[[:space:]]+#.*$ ]]; then
+                    val=${BASH_REMATCH[1]}
+                fi
+                val=${val%"${val##*[![:space:]]}"}
+            fi
+
+            # >>> ПРИОРИТЕТ СУЩЕСТВУЮЩИХ ПЕРЕМЕННЫХ <<<
+            # .env подтягивается ТОЛЬКО если переменная не установлена
+            # или установлена, но пустая.
+            if [[ -z "${!key-}" ]]; then
+                export "$key=$val"
+            fi
+        else
+            echo "$progname: пропущена строка в $envfile: $line" >&2
+        fi
+    done < "$envfile"
+fi
+
+# --- подготовка шаблона ---
+if [[ "$template" == "-" ]]; then
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT
+    cat > "$tmp"
+    template=$tmp
+elif [[ ! -f "$template" ]]; then
+    echo "$progname: файл '$template' не найден" >&2
+    exit 1
+fi
+
+# --- определение цели вывода ---
+if [[ -z "$outfile" || "$outfile" == "-" ]]; then
+    target="/dev/stdout"
+else
+    target="$outfile"
+fi
+
+# --- защита от перезаписи шаблона ---
+if [[ "$template" != "-" && -n "$outfile" ]]; then
+    # нормализуем пути
+    t_abs=$(readlink -f -- "$template" 2>/dev/null || echo "$template")
+    o_abs=$(readlink -f -- "$outfile" 2>/dev/null || echo "$outfile")
+    if [[ "$t_abs" == "$o_abs" ]]; then
+        echo "$progname: отказ: шаблон и выходной файл совпадают ($template)" >&2
+        exit 1
+    fi
+fi
+
+# --- strict-проверка ---
+if (( strict )); then
+    mapfile -t used < <(
+        grep -oE '\{\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*' "$template" \
+        | sed -E 's/\{\{[[:space:]]*//' \
+        | sort -u
+    )
+    missing=()
+    for v in "${used[@]}"; do
+        if [[ -z "${!v-}" ]]; then
+            if ! grep -qE "\{\{[[:space:]]*$v[[:space:]]*\|.*default\(" "$template"; then
+                missing+=("$v")
+            fi
+        fi
+    done
+    if (( ${#missing[@]} )); then
+        printf '%s: не определены переменные: %s\n' "$progname" "${missing[*]}" >&2
+        exit 2
+    fi
+fi
+
+# --- основная замена + циклы ---
+awk '
+function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+
+# POSIX shell-safe quoting
+function shellquote(s,   r, i, c) {
+    r = ""
+    for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\047") r = r "\047\\\047\047"
+        else r = r c
+    }
+    return "\047" r "\047"
+}
+
+function run_capture(cmd,   out, line) {
+    out = ""
+    if ((cmd | getline line) > 0) out = line
+    while ((cmd | getline line) > 0) out = out "\n" line
+    close(cmd)
+    return out
+}
+
+function f_default(v, arg) { if (v == "") return unquote(arg); return v }
+
+function f_b64encode(v) {
+    return run_capture("printf %s " shellquote(v) " | base64 | tr -d \047\n\047")
+}
+function f_b64decode(v) {
+    return run_capture("printf %s " shellquote(v) " | base64 -d 2>/dev/null")
+}
+function f_upper(v) { return toupper(v) }
+function f_lower(v) { return tolower(v) }
+function f_trim(v)  { return trim(v) }
+function f_quote(v) { return shellquote(v) }
+
+function f_sha256(v) {
+    return run_capture("printf %s " shellquote(v) " | (sha256sum 2>/dev/null || shasum -a 256) | cut -d\047 \047 -f1")
+}
+function f_md5(v) {
+    return run_capture("printf %s " shellquote(v) " | (md5sum 2>/dev/null || md5) | cut -d\047 \047 -f1")
+}
+
+function ord(c) {
+    if (!ord_init) { for (i = 0; i < 256; i++) ord_chr[sprintf("%c", i)] = i; ord_init = 1 }
+    return ord_chr[c]
+}
+function f_hexdump(v,   i, r) {
+    r = ""
+    for (i = 1; i <= length(v); i++) r = r sprintf("%02x", ord(substr(v, i, 1)))
+    return r
+}
+function f_urlencode(v,   i, c, r) {
+    r = ""
+    for (i = 1; i <= length(v); i++) {
+        c = substr(v, i, 1)
+        if (c ~ /[A-Za-z0-9._~-]/) r = r c
+        else r = r "%" sprintf("%02X", ord(c))
+    }
+    return r
+}
+
+function f_replace(v, arg,   parts) {
+    split(unquote(arg), parts, /,[[:space:]]*/)
+    gsub(unquote(parts[1]), unquote(parts[2]), v)
+    return v
+}
+function f_substr(v, arg,   parts) {
+    split(unquote(arg), parts, /[[:space:]]*,[[:space:]]*/)
+    if (parts[2] != "") return substr(v, parts[1]+0, parts[2]+0)
+    return substr(v, parts[1]+0)
+}
+function f_indent(v, arg,   n, pad, lines, i, r) {
+    n = unquote(arg) + 0
+    pad = sprintf("%*s", n, "")
+    split(v, lines, "\n")
+    r = ""
+    for (i = 1; i <= length(lines); i++) r = r (i > 1 ? "\n" : "") pad lines[i]
+    return r
+}
+
+function unquote(s) {
+    s = trim(s)
+    if (s ~ /^\047.*\047$/)      s = substr(s, 2, length(s)-2)
+    else if (s ~ /^".*"$/)       s = substr(s, 2, length(s)-2)
+    gsub(/\\\047/, "\047", s)
+    gsub(/\\\\/, "\\", s)
+    return s
+}
+
+function apply_filter(v, f,   name, arg, p) {
+    f = trim(f)
+    p = index(f, "(")
+    if (p > 0) {
+        name = trim(substr(f, 1, p-1))
+        arg  = substr(f, p+1)
+        sub(/\)[[:space:]]*$/, "", arg)
+    } else { name = f; arg = "" }
+    if (name == "default")   return f_default(v, arg)
+    if (name == "b64encode") return f_b64encode(v)
+    if (name == "b64decode") return f_b64decode(v)
+    if (name == "upper")     return f_upper(v)
+    if (name == "lower")     return f_lower(v)
+    if (name == "trim")      return f_trim(v)
+    if (name == "quote")     return f_quote(v)
+    if (name == "urlencode") return f_urlencode(v)
+    if (name == "sha256")    return f_sha256(v)
+    if (name == "md5")       return f_md5(v)
+    if (name == "hexdump")   return f_hexdump(v)
+    if (name == "replace")   return f_replace(v, arg)
+    if (name == "substr")    return f_substr(v, arg)
+    if (name == "indent")    return f_indent(v, arg)
+    return v
+}
+
+# ============ контекст циклов ============
+function lv_set(d, name, val) { loop_name[d] = name; loop_val[d] = val }
+
+function lv_get(name,   i) {
+    for (i = depth; i >= 1; i--)
+        if (loop_name[i] == name) return loop_val[i]
+    return ""
+}
+function lv_has(name,   i) {
+    for (i = depth; i >= 1; i--)
+        if (loop_name[i] == name) return 1
+    return 0
+}
+
+# Разбиение строки на элементы: разделители — пробел, таб, \r,
+# один или несколько подряд.
+function split_list(s,   i, c, buf, n, in_word) {
+    n = 0; buf = ""; in_word = 0
+    for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == " " || c == "\t" || c == "\r") {
+            if (in_word) { items[++n] = buf; buf = ""; in_word = 0 }
+        } else {
+            buf = buf c; in_word = 1
+        }
+    }
+    if (in_word) items[++n] = buf
+    return n
+}
+
+# Рендер одной строки: {{ VAR | filter | ... }} → значение.
+function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2) {
+    out = ""
+    while (match(line, /\{\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(\|[^{}]*)?\}\}/)) {
+        pre  = substr(line, 1, RSTART-1)
+        ph   = substr(line, RSTART, RLENGTH)
+        post = substr(line, RSTART+RLENGTH)
+        body = ph
+        sub(/^\{\{[[:space:]]*/, "", body)
+        sub(/\}\}$/, "", body)
+        name = body
+        sub(/[[:space:]]*\|.*$/, "", name)
+        name = trim(name)
+
+        if (lv_has(name)) v = lv_get(name)
+        else              v = ENVIRON[name]
+
+        rest = body
+        sub(/^[^|]*/, "", rest)
+        while (rest ~ /\|/) {
+            sub(/^[[:space:]]*\|[[:space:]]*/, "", rest)
+            d2 = 0; j = 1; f = ""
+            while (j <= length(rest)) {
+                c = substr(rest, j, 1)
+                if (c == "(") d2++
+                else if (c == ")") d2--
+                if (c == "|" && d2 == 0) break
+                f = f c; j++
+            }
+            v = apply_filter(v, trim(f))
+            rest = substr(rest, j)
+        }
+        out = out pre v
+        line = post
+    }
+    return out line
+}
+
+# Рендер многострочного блока (без завершающего \n).
+function render_block(text,   m, arr, i, acc) {
+    m = split(text, arr, "\n")
+    acc = ""
+    for (i = 1; i <= m; i++) {
+        if (i == m && arr[i] == "") break
+        acc = acc render(arr[i]) (i < m ? "\n" : "")
+    }
+    return acc
+}
+
+function tag_kind(line) {
+    if (match(line, /\{%[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*%\}/)) return "for"
+    if (match(line, /\{%[[:space:]]*endfor[[:space:]]*%\}/)) return "endfor"
+    return ""
+}
+
+BEGIN { depth = 0 }
+
+{
+    line = $0
+    kind = tag_kind(line)
+
+    if (kind == "for") {
+        # разбор: {% for VAR in LIST %}
+        tag = substr(line, RSTART, RLENGTH)
+        gsub(/\{%[[:space:]]*for[[:space:]]+/, "", tag)
+        gsub(/[[:space:]]*%\}/, "", tag)
+        split(tag, kv, /[[:space:]]+in[[:space:]]+/)
+        forvar   = kv[1]
+        listname = kv[2]
+
+        head  = substr(line, 1, RSTART-1)
+        after = substr(line, RSTART + RLENGTH)
+
+        # текст перед {% for %} отдаём наружу сразу
+        if (depth > 0) for_body[depth] = for_body[depth] head
+        else           if (head != "") print render(head)
+
+        depth++
+        for_name[depth] = forvar
+        for_list[depth] = listname
+        for_body[depth] = ""
+        if (after != "") for_body[depth] = after "\n"
+        next
+    }
+
+    if (kind == "endfor") {
+        if (depth == 0) {
+            print "templater: {% endfor %} без {% for %}" > "/dev/stderr"
+            exit 2
+        }
+        before = substr(line, 1, RSTART-1)
+        after  = substr(line, RSTART + RLENGTH)
+        if (before != "") for_body[depth] = for_body[depth] before "\n"
+
+        listname = for_list[depth]
+        list = lv_has(listname) ? lv_get(listname) : ENVIRON[listname]
+        cnt  = split_list(list)
+        body = for_body[depth]
+        forvar = for_name[depth]
+
+        # разворот тела цикла cnt раз
+        acc = ""
+        for (k = 1; k <= cnt; k++) {
+            lv_set(depth, forvar, items[k])
+            rendered = render_block(body)
+            acc = acc rendered
+            if (k < cnt) acc = acc "\n"
+        }
+
+        depth--
+        if (depth > 0) for_body[depth] = for_body[depth] acc
+        else           printf "%s", acc
+
+        if (after != "") {
+            if (depth > 0) for_body[depth] = for_body[depth] "\n" after
+            else           print after
+        }
+        next
+    }
+
+    if (depth > 0) for_body[depth] = for_body[depth] line "\n"
+    else           print render(line)
+}
+
+END {
+    if (depth > 0) {
+        print "templater: {% for %} без {% endfor %}" > "/dev/stderr"
+        exit 2
+    }
+}
+' "$template" > "$target"

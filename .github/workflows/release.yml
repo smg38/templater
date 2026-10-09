@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Run tests
+        run: bats --print-output-on-failure test/
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp templater.sh dist/
+          cp templater.md dist/
+          cp README.md dist/
+          cp LICENSE dist/
+          cd dist && sha256sum * > SHA256SUMS
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/templater.sh
+            dist/templater.md
+            dist/README.md
+            dist/LICENSE            dist/SHA256SUMS
+          generate_release_notes: true

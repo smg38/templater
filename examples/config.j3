@@ -1,0 +1,5 @@
+app: {{ APP_NAME | upper }}
+greeting: {{ GREETING | default('hello') | quote }}
+url: https://example.com/?q={{ GREETING | urlencode }}
+token: {{ SECRET | b64encode }}
+token_sha256: {{ SECRET | sha256 }}
