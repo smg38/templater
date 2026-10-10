@@ -6,6 +6,9 @@ TESTS  := test/
 
 all: lint test
 
+run-sh:
+	bash test/run.sh
+
 test:
 	bats --print-output-on-failure $(TESTS)
 
@@ -17,7 +20,7 @@ shellcheck:
 
 lint: syntax shellcheck
 
-ci: lint test
+ci: lint run-sh test
 
 install:
 	install -m 0755 $(SCRIPT) /usr/local/bin/templater

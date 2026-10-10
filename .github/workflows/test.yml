@@ -27,6 +27,14 @@ jobs:
       - name: shellcheck
         run: shellcheck --severity=warning templater.sh
 
+  run-sh:
+    name: run.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test/run.sh
+        run: bash test/run.sh
+
   test:
     name: Bats (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -51,11 +59,9 @@ jobs:
   integration:
     name: End-to-end (Ubuntu)
     runs-on: ubuntu-latest
-    needs: [ test ]
+    needs: [ lint, test ]
     steps:
       - uses: actions/checkout@v4
-      - name: Install bats
-        run: sudo apt-get update && sudo apt-get install -y bats
       - name: Smoke test
         run: |
           cd examples

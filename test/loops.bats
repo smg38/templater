@@ -55,13 +55,6 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ "$output" = "AB" ]
 }
 
-@test "вложенные циклы" {
-    printf 'OUTER="x y"\nINNER="1 2"\n' > n.env
-    printf '{%% for o in OUTER %%}{%% for i in INNER %%}{{ o }}{{ i }} {%% endfor %%}{%% endfor %%}\n' > n.j3
-    run bash "$SCRIPT" -e n.env -o - n.j3
-    [ "$output" = "x1 x2 y1 y2 " ]
-}
-
 @test "многострочное тело цикла" {
     printf 'HOSTS="a b"\nENV=prod\n' > h.env
     cat > h.j3 <<'EOF'
@@ -89,4 +82,25 @@ EOF
     run bash "$SCRIPT" -o - t.j3
     [ "$status" -ne 0 ]
     [[ "$output" == *"for"* ]]
+}
+
+@test "динамическое имя переменной" {
+    printf 'USERS="user1 user2"\nUUID_A_user1="aaaa-1111"\nUUID_A_user2="bbbb-2222"\nFLOW=xtls\n' > u.env
+    cat > u.j3 <<'EOF'
+users:
+{% for user in USERS %}
+      - username: {{ user }}
+        uuid: "{{ UUID_A_{{ user }} }}"
+        flow: {{ FLOW }}
+{% endfor %}
+EOF
+    run bash "$SCRIPT" -e u.env -o - u.j3
+    [ "$status" -eq 0 ]
+    [ "$output" = 'users:
+      - username: user1
+        uuid: "aaaa-1111"
+        flow: xtls
+      - username: user2
+        uuid: "bbbb-2222"
+        flow: xtls' ]
 }

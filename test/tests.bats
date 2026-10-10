@@ -1,4 +1,9 @@
 # --- автопоиск .env/.out ---
+setup() {
+    SCRIPT="${BATS_TEST_DIRNAME}/../templater.sh"
+    WORK=$(mktemp -d); cd "$WORK"
+}
+teardown() { cd /; rm -rf "$WORK"; }
 
 @test "автопоиск .env: file.j3 + file.env" {
     echo 'A={{ FOO }}' > file.j3

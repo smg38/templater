@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test/run.sh — минимальный раннер без bats
-# v 3.3.0, 2026-10-10
+# v 3.3.2, 2026-10-10
 # Автор: @smg38
 set -uo pipefail
 
@@ -85,7 +85,21 @@ run_case "loop-filter"  "A;B;"    USERS="a b"          -- '{% for u in USERS %}{
 #     -- '{% for o in OUTER %}{% for i in INNER %}{{ o }}{{ i }} {% endfor %}{% endfor %}'
 run_case "loop-empty"   "AB"      USERS=               -- 'A{% for u in USERS %}X{% endfor %}B'
 run_case "loop-missing" "AB"                           -- 'A{% for u in NOPE %}X{% endfor %}B'
-
+run_case "loop-dynname" \
+'users:
+      - username: user1
+        uuid: "aaaa-1111"
+        flow: xtls-rprx-vision
+      - username: user2
+        uuid: "bbbb-2222"
+        flow: xtls-rprx-vision' \
+    USERS="user1 user2" UUID_A_user1=aaaa-1111 UUID_A_user2=bbbb-2222 FLOW_USERS=xtls-rprx-vision \
+    -- 'users:
+{% for user in USERS %}
+      - username: {{ user }}
+        uuid: "{{ UUID_A_{{ user }} }}"
+        flow: {{ FLOW_USERS }}
+{% endfor %}'
 # --- .env / автопоиск ---
 test_env() {
     local name=$1 expected=$2 envbody=$3 script=$4

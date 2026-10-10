@@ -1,6 +1,7 @@
 *.out
 *.env
 !examples/*.env
+!*.env.example
 .DS_Store
 *.swp
 projmap_export.txt

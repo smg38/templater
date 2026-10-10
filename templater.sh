@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # templater.sh
-# v 3.3.0
+# v 3.3.2 2026-10-10
 set -euo pipefail
 
 progname=${0##*/}
@@ -109,7 +109,7 @@ if (( strict )); then
     missing=()
     for v in "${used[@]}"; do
         if [[ -z "${!v-}" ]]; then
-            grep -qE "\{\{[[:space:]]*$v[[:space:]]*\|.*default\(" "$template" || missing+=("$v")
+            grep -qE "\{\{[[:space:]]*${v}[[:space:]]*\|.*default\(" "$template" || missing+=("$v")
         fi
     done
     (( ${#missing[@]} )) && { printf '%s: не определены переменные: %s\n' "$progname" "${missing[*]}" >&2; exit 2; }
@@ -244,15 +244,41 @@ function split_list(s,   i, c, buf, n, in_word) {
     return n
 }
 
-function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2) {
+function find_ph(line,   i, c, depth2, start, p, rest) {
+    start = index(line, "{{")
+    if (start == 0) { RSTART = 0; RLENGTH = 0; return 0 }
+    rest = substr(line, start+2)
+    depth2 = 1; i = 1; p = 0
+    while (i <= length(rest)) {
+        if (substr(rest, i, 2) == "{{") { depth2++; i += 2; continue }
+        if (substr(rest, i, 2) == "}}") { depth2--; if (depth2 == 0) { p = i; break }; i += 2; continue }
+        i++
+    }
+    if (p == 0) { RSTART = 0; RLENGTH = 0; return 0 }
+    RSTART = start
+    RLENGTH = (start + 2 + p + 1) - start   # от {{ до }} включительно
+    return 1
+}
+
+function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2, inner) {
     out = ""
-    while (match(line, /\{\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(\|[^{}]*)?\}\}/)) {
+    while (find_ph(line)) {
         pre  = substr(line, 1, RSTART-1)
         ph   = substr(line, RSTART, RLENGTH)
         post = substr(line, RSTART+RLENGTH)
         body = ph
         sub(/^\{\{[[:space:]]*/, "", body)
-        sub(/\}\}$/, "", body)
+        sub(/[[:space:]]*\}\}$/, "", body)
+
+        # развернуть вложенные {{ var }} внутри имени
+        while (match(body, /\{\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\}\}/)) {
+            inner = substr(body, RSTART+2, RLENGTH-4)
+            gsub(/[[:space:]]/, "", inner)
+            if (lv_has(inner)) v = lv_get(inner)
+            else               v = ENVIRON[inner]
+            body = substr(body, 1, RSTART-1) v substr(body, RSTART+RLENGTH)
+        }
+
         name = body
         sub(/[[:space:]]*\|.*$/, "", name)
         name = trim(name)
@@ -339,7 +365,6 @@ function process_line(line,   out, kind, tag, forvar, listname, head, after,
             for_name[depth] = forvar
             for_list[depth] = listname
             for_body[depth] = ""
-            # если после {% for %} есть остаток — рекурсивно обработать
             if (after != "") {
                 if (after ~ /\{%[[:space:]]*endfor[[:space:]]*%\}/) {
                     line = after
@@ -347,7 +372,8 @@ function process_line(line,   out, kind, tag, forvar, listname, head, after,
                 }
                 for_body[depth] = after
             }
-            break
+            if (out != "") print out
+            return
         }
 
         if (kind == "endfor") {
@@ -379,10 +405,14 @@ function process_line(line,   out, kind, tag, forvar, listname, head, after,
             else           out = out acc
 
             line = after
+            if (line == "") {
+                if (out != "") print out
+                return
+            }
             continue
         }
     }
-    print out
+    if (out != "") print out
 }
 
 BEGIN { depth = 0 }
