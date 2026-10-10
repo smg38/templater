@@ -57,7 +57,8 @@ if (name == "reverse") return f_reverse(v)
 ## Диаграмма потока
 
 ```
-CLI args ──► getopts ──► envfile? ──► load .env ──► export (если не задано)
+CLI args ──► getopts ──► envfiles[] ──► load each ──► export (если не задано)
+                                       (последовательно, первое определение побеждает)
                 │
                 ▼
             template file (или stdin)

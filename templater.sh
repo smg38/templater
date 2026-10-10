@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # templater.sh
-# v 3.3.2 2026-10-10
+# v 3.3.3 2026-10-10
 set -euo pipefail
 
 progname=${0##*/}
@@ -17,7 +17,7 @@ Behavior:
   'file.out' (extension replaced).
 
 Options:
-  -e ENVFILE  загрузить переменные из ENVFILE
+  -e ENVFILE  загрузить переменные из ENVFILE (можно несколько раз)
   -o OUTPUT   записать результат в OUTPUT
   -s          strict: ошибка на неопределённую переменную без default
   -h          справка
@@ -38,11 +38,11 @@ EOF
     exit 1
 }
 
-strict=0; outfile=""; outfile_given=0; envfile=""; envfile_given=0; template=""
+strict=0; outfile=""; outfile_given=0; envfile=(); envfile_given=0; template=""
 
 while getopts ":e:o:sh" opt; do
     case $opt in
-        e) envfile=$OPTARG; envfile_given=1 ;;
+        e) envfiles+=("$OPTARG"); envfile_given=1 ;;
         o) outfile=$OPTARG; outfile_given=1 ;;
         s) strict=1 ;;
         h) usage ;;
@@ -58,12 +58,13 @@ if [[ "$template" != "-" ]]; then
     dir=$(dirname -- "$template"); base=$(basename -- "$template")
     stem=${base%.*}; [[ "$stem" == "$base" ]] && stem=$base
     if (( ! envfile_given )); then
-        auto_env="$dir/$stem.env"; [[ -f "$auto_env" ]] && envfile=$auto_env
+        auto_env="$dir/$stem.env"
+        [[ -f "$auto_env" ]] && envfiles+=("$auto_env")
     fi
     (( ! outfile_given )) && outfile="$dir/$stem.out"
 fi
 
-if [[ -n "$envfile" ]]; then
+for envfile in "${envfiles[@]}"; do
     [[ -f "$envfile" ]] || { echo "$progname: env-файл '$envfile' не найден" >&2; exit 1; }
     while IFS= read -r line || [[ -n "$line" ]]; do
         line=${line%$'\r'}
@@ -87,7 +88,7 @@ if [[ -n "$envfile" ]]; then
             echo "$progname: пропущена строка в $envfile: $line" >&2
         fi
     done < "$envfile"
-fi
+done
 
 if [[ "$template" == "-" ]]; then
     tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT

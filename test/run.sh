@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test/run.sh — минимальный раннер без bats
-# v 3.3.2, 2026-10-10
+# v 3.3.3, 2026-10-10
 # Автор: @smg38
 set -uo pipefail
 
@@ -113,11 +113,41 @@ test_env() {
     rm -rf "$work"
     assert_equal "$name" "$expected" "$actual"
 }
+# --- несколько -e ---
+test_multi_e() {
+    local name=$1 expected=$2; shift 2
+    local work; work=$(mktemp -d)
+    pushd "$work" >/dev/null
+    printf 'A={{ FOO }}\n' > t.j3
+    printf 'FOO=first\n'  > a.env
+    printf 'FOO=second\n' > b.env
+    local actual
+    actual=$(bash "$SCRIPT" -e a.env -e b.env -o - t.j3 2>/dev/null)
+    popd >/dev/null
+    rm -rf "$work"
+    assert_equal "$name" "$expected" "$actual"
+}
 
+test_multi_e "multi-e first wins"  "A=first"
+test_multi_e "multi-e both loaded" "A=first"
 test_env "envfile-autoload"        "A=bar"     "FOO=bar"                     ""
 test_env "envfile-inline-comment"  "A=bar"     "FOO=bar # inline comment"    ""
 test_env "env-overrides-envfile"   "A=fromenv" "FOO=fromfile"                "FOO=fromenv"
+test_multi_e2() {
+    local name=$1 expected=$2; shift 2
+    local work; work=$(mktemp -d)
+    pushd "$work" >/dev/null
+    printf 'A={{ FOO }}-{{ BAR }}\n' > t.j3
+    printf 'FOO=first\n'             > a.env
+    printf 'BAR=second\n'            > b.env
+    local actual
+    actual=$(bash "$SCRIPT" -e a.env -e b.env -o - t.j3 2>/dev/null)
+    popd >/dev/null
+    rm -rf "$work"
+    assert_equal "$name" "$expected" "$actual"
+}
 
+test_multi_e2 "multi-e merge" "A=first-second"
 # --- итог ---
 echo
 echo "===================="

@@ -4,7 +4,7 @@
 [![ShellCheck](https://img.shields.io/badge/shellcheck-passing-brightgreen)](https://www.shellcheck.net/)
 [![Bats](https://img.shields.io/badge/tests-bats-blue)](https://github.com/bats-core/bats-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.3.3-blue.svg)](CHANGELOG.md)
 
 Простой шаблонизатор для подстановки переменных окружения в текстовые
 файлы. Поддерживает модификаторы (фильтры), автозагрузку `.env` и
@@ -272,7 +272,7 @@ MULTILINE="line1\nline2"
 
 | Ключ | Описание |
 |---|---|
-| `-e ENVFILE` | загрузить переменные из ENVFILE (отключает автопоиск `.env`) |
+| `-e ENVFILE` | загрузить переменные из ENVFILE; можно указывать несколько раз (отключает автопоиск `.env`) |
 | `-o OUTPUT` | записать результат в OUTPUT (отключает автопоиск `.out`) |
 | `-s` | strict: ошибка, если переменная не определена и нет `default` |
 | `-h` | справка |
@@ -284,7 +284,9 @@ MULTILINE="line1\nline2"
 **Источники переменных** (высший → низший):
 
 1. окружение процесса (`FOO=bar templater ...`);
-2. `-e ENVFILE`;
+2. `-e ENVFILE` — если указано несколько, они применяются слева направо,
+   переменные из более позднего файла не перезаписывают уже установленные
+   (как и в случае с `.env`);
 3. `<template>.env` (автопоиск).
 
 **Источники вывода:**
@@ -318,6 +320,12 @@ cat hello.out          # Hello Override!
 ```bash
 templater -e prod.env -o /etc/app/config.yml config.j3
 ```
+Несколько env-файлов применяются слева направо; при конфликте выигрывает
+первое определение:
+```bash
+templater -e defaults.env -e prod.env config.j3
+```
+
 
 ### stdin → stdout
 
