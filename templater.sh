@@ -64,7 +64,7 @@ if [[ "$template" != "-" ]]; then
     (( ! outfile_given )) && outfile="$dir/$stem.out"
 fi
 
-for envfile in "${envfiles[@]}"; do
+for envfile in ${envfiles[@]+"${envfiles[@]}"}; do
     [[ -f "$envfile" ]] || { echo "$progname: env-файл '$envfile' не найден" >&2; exit 1; }
     while IFS= read -r line || [[ -n "$line" ]]; do
         line=${line%$'\r'}
