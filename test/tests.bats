@@ -64,7 +64,7 @@ teardown() { cd /; rm -rf "$WORK"; }
 }
 
 @test "there is no .env nearby - variables are taken only from the environment" {
-    echo 'A={{ FOO | default(\"n/a\") }}' > file.j3
+    printf '%s\n' 'A={{ FOO | default("n/a") }}' > file.j3
     rm -f file.env file.out
     run bash "$SCRIPT" file.j3
     [ "$(cat file.out)" = "A=n/a" ]
