@@ -1,11 +1,11 @@
-# --- автопоиск .env/.out ---
+# --- autofind .env/.out ---
 setup() {
     SCRIPT="${BATS_TEST_DIRNAME}/../templater.sh"
     WORK=$(mktemp -d); cd "$WORK"
 }
 teardown() { cd /; rm -rf "$WORK"; }
 
-@test "автопоиск .env: file.j3 + file.env" {
+@test "autofind .env: file.j3 + file.env" {
     echo 'A={{ FOO }}' > file.j3
     echo 'FOO=bar'    > file.env
     rm -f file.out
@@ -15,7 +15,7 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ "$(cat file.out)" = "A=bar" ]
 }
 
-@test "автопоиск .out перезаписывает существующий" {
+@test "autofind .out rewrites file.out" {
     echo 'A={{ FOO }}' > file.j3
     echo 'FOO=bar'    > file.env
     echo 'stale'      > file.out
@@ -23,14 +23,14 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ "$(cat file.out)" = "A=bar" ]
 }
 
-@test "окружение перебивает .env" {
+@test "the environment interrupts .env" {
     echo 'A={{ FOO }}' > file.j3
     echo 'FOO=fromfile' > file.env
     run env FOO=fromenv bash "$SCRIPT" file.j3
     [ "$(cat file.out)" = "A=fromenv" ]
 }
 
-@test "-e отключает автопоиск .env" {
+@test "-e disables autofind .env" {
     echo 'A={{ FOO }}' > file.j3
     echo 'FOO=auto'   > file.env
     echo 'FOO=explicit' > other.env
@@ -38,7 +38,7 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ "$(cat file.out)" = "A=explicit" ]
 }
 
-@test "-o отключает автопоиск .out" {
+@test "-o disables autofind .out" {
     echo 'A={{ FOO }}' > file.j3
     echo 'FOO=bar'    > file.env
     rm -f custom.out file.out
@@ -47,7 +47,7 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ ! -f file.out ]
 }
 
-@test "файл без расширения: file -> file.env / file.out" {
+@test "file without extension: file -> file.env / file.out" {
     echo 'A={{ FOO }}' > plain
     echo 'FOO=x'       > plain.env
     rm -f plain.out
@@ -55,7 +55,7 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ "$(cat plain.out)" = "A=x" ]
 }
 
-@test "stdin не создаёт .env/.out" {
+@test "stdin does not create .env/.out" {
     run bash -c "printf 'A={{ FOO }}\n' | env FOO=1 bash '$SCRIPT' -"
     [ "$status" -eq 0 ]
     [ "$output" = "A=1" ]
@@ -63,7 +63,7 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ ! -f out ]
 }
 
-@test "нет .env рядом — переменные берутся только из окружения" {
+@test "there is no .env nearby - variables are taken only from the environment" {
     echo 'A={{ FOO | default(\"n/a\") }}' > file.j3
     rm -f file.env file.out
     run bash "$SCRIPT" file.j3

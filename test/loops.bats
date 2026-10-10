@@ -6,28 +6,28 @@ setup() {
 }
 teardown() { cd /; rm -rf "$WORK"; }
 
-@test "список через пробелы" {
+@test "list by spaces" {
     printf 'USERS="alice bob carol"\n' > u.env
     printf '{%% for u in USERS %%}{{ u }};{%% endfor %%}\n' > u.j3
     run bash "$SCRIPT" -e u.env -o - u.j3
     [ "$output" = "alice;bob;carol;" ]
 }
 
-@test "список через табы и несколько пробелов" {
+@test "list by tabs and multiple spaces" {
     printf 'USERS="a\t\tb   c"\n' > u.env
     printf '{%% for u in USERS %%}{{ u }};{%% endfor %%}\n' > u.j3
     run bash "$SCRIPT" -e u.env -o - u.j3
     [ "$output" = "a;b;c;" ]
 }
 
-@test "фильтры к элементу" {
+@test "filters on element" {
     printf 'USERS="alice bob"\n' > u.env
     printf '{%% for u in USERS %%}{{ u | upper }};{%% endfor %%}\n' > u.j3
     run bash "$SCRIPT" -e u.env -o - u.j3
     [ "$output" = "ALICE;BOB;" ]
 }
 
-@test "другие переменные внутри цикла" {
+@test "other vars inside loop" {
     printf 'USERS="a b"\n' > u.env
     printf 'ENV=prod\n' >> u.env
     printf '{%% for u in USERS %%}{{ u }}.{{ ENV }};{%% endfor %%}\n' > u.j3
@@ -35,27 +35,27 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ "$output" = "a.prod;b.prod;" ]
 }
 
-@test "другие переменные + фильтры внутри цикла" {
+@test "other vars and filters inside loop" {
     printf 'USERS="a b"\nENV=prod\n' > u.env
     printf '{%% for u in USERS %%}{{ u | upper }}-{{ ENV | upper }};{%% endfor %%}\n' > u.j3
     run bash "$SCRIPT" -e u.env -o - u.j3
     [ "$output" = "A-PROD;B-PROD;" ]
 }
 
-@test "пустой список" {
+@test "empty list" {
     printf 'USERS=""\n' > u.env
     printf 'A{%% for u in USERS %%}X{%% endfor %%}B\n' > u.j3
     run bash "$SCRIPT" -e u.env -o - u.j3
     [ "$output" = "AB" ]
 }
 
-@test "отсутствующий список" {
+@test "missing list" {
     printf 'A{%% for u in NOPE %%}X{%% endfor %%}B\n' > u.j3
     run bash "$SCRIPT" -o - u.j3
     [ "$output" = "AB" ]
 }
 
-@test "многострочное тело цикла" {
+@test "multiline loop body" {
     printf 'HOSTS="a b"\nENV=prod\n' > h.env
     cat > h.j3 <<'EOF'
 {% for h in HOSTS %}
@@ -70,21 +70,21 @@ EOF
   env: prod" ]
 }
 
-@test "endfor без for" {
+@test "endfor without for" {
     printf 'A{%% endfor %%}B\n' > t.j3
     run bash "$SCRIPT" -o - t.j3
     [ "$status" -ne 0 ]
     [[ "$output" == *"endfor"* ]]
 }
 
-@test "for без endfor" {
+@test "for without endfor" {
     printf 'A{%% for x in Y %%}B\n' > t.j3
     run bash "$SCRIPT" -o - t.j3
     [ "$status" -ne 0 ]
     [[ "$output" == *"for"* ]]
 }
 
-@test "динамическое имя переменной" {
+@test "dynamic variable name" {
     printf 'USERS="user1 user2"\nUUID_A_user1="aaaa-1111"\nUUID_A_user2="bbbb-2222"\nFLOW=xtls\n' > u.env
     cat > u.j3 <<'EOF'
 users:
