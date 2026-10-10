@@ -4,7 +4,7 @@
 [![ShellCheck](https://img.shields.io/badge/shellcheck-passing-brightgreen)](https://www.shellcheck.net/)
 [![Bats](https://img.shields.io/badge/tests-bats-blue)](https://github.com/bats-core/bats-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](CHANGELOG.md)
 
 Простой шаблонизатор для подстановки переменных окружения в текстовые
 файлы. Поддерживает модификаторы (фильтры), автозагрузку `.env` и
@@ -400,7 +400,6 @@ GitHub Actions прогоняет на каждый push и pull request:
 - Циклы `{% for %}` не вкладываются (один уровень).
 - Нет вложенных плейсхолдеров, кроме случая динамического имени
   переменной внутри `{{ ... }}` (см. «Циклы»).
-- Нет вложенных плейсхолдеров (`{{ {{ X }} }}`).
 - `replace('A','B')` — аргументы режутся по запятой.
 - Один проход; результат не переобрабатывается.
 - Зависит от POSIX `awk` (проверено на gawk, mawk, busybox awk).
