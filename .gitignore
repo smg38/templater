@@ -3,3 +3,5 @@
 !examples/*.env
 .DS_Store
 *.swp
+projmap_export.txt
+projmap_index.csv

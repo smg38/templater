@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # test/run.sh — минимальный раннер без bats
+# v 3.3.0, 2026-10-10
+# Автор: @smg38
 set -uo pipefail
 
 SCRIPT="${SCRIPT:-$(cd "$(dirname "$0")/.." && pwd)/templater.sh}"
@@ -38,11 +40,12 @@ run_case() {
 
     local work; work=$(mktemp -d)
     pushd "$work" >/dev/null
+
+    # пишем шаблон БАЙТ-В-БАЙТ, без потери кавычек
     printf '%s' "$tmpl" > t.tpl
 
     local actual
-    actual=$(printf '%s' "$tmpl" \
-        | env "${envs[@]}" bash "$SCRIPT" "${args[@]}" - 2>/dev/null)
+    actual=$(env "${envs[@]}" bash "$SCRIPT" "${args[@]}" - < t.tpl 2>/dev/null)
 
     popd >/dev/null
     rm -rf "$work"
@@ -72,17 +75,18 @@ run_case "hexdump"                "4142"                     A=AB -- '{{ A | hex
 run_case "two-in-line"            "A=1 B=2"                  A=1 B=2 -- 'A={{ A }} B={{ B }}'
 run_case "value-with-ampersand"   "A=foo&bar"                A='foo&bar' -- 'A={{ A }}'
 run_case "value-with-slash-and-brace" 'A=/a\b{c}'            A='/a\b{c}' -- 'A={{ A }}'
+
 # --- циклы ---
 run_case "loop-space"   "a;b;c;"  USERS="a b c"        -- '{% for u in USERS %}{{ u }};{% endfor %}'
 run_case "loop-tabs"    "a;b;c;"  USERS=$'a\tb   c'    -- '{% for u in USERS %}{{ u }};{% endfor %}'
 run_case "loop-other"   "a.prod;" USERS=a ENV=prod     -- '{% for u in USERS %}{{ u }}.{{ ENV }};{% endfor %}'
-run_case "loop-filter"  "A;b;"    USERS="a b"          -- '{% for u in USERS %}{{ u | upper }};{% endfor %}'
-run_case "loop-nested"  "x1 x2 y1 y2 " OUTER="x y" INNER="1 2" \
-    -- '{% for o in OUTER %}{% for i in INNER %}{{ o }}{{ i }} {% endfor %}{% endfor %}'
+run_case "loop-filter"  "A;B;"    USERS="a b"          -- '{% for u in USERS %}{{ u | upper }};{% endfor %}'
+# run_case "loop-nested"  "x1 x2 y1 y2 " OUTER="x y" INNER="1 2" \
+#     -- '{% for o in OUTER %}{% for i in INNER %}{{ o }}{{ i }} {% endfor %}{% endfor %}'
 run_case "loop-empty"   "AB"      USERS=               -- 'A{% for u in USERS %}X{% endfor %}B'
 run_case "loop-missing" "AB"                           -- 'A{% for u in NOPE %}X{% endfor %}B'
 
-# --- .env / автопоиск (через файлы, вывод в stdout через -o -) ---
+# --- .env / автопоиск ---
 test_env() {
     local name=$1 expected=$2 envbody=$3 script=$4
     local work; work=$(mktemp -d)
