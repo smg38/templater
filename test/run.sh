@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test/run.sh — минимальный раннер без bats
-# v 3.4.0, 2026-10-21
+# v 3.4.1, 2026-10-21
 # Автор: @smg38
 set -uo pipefail
 

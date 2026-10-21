@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # templater.sh
-# v 3.4.0 2026-10-21
+# v 3.4.1 2026-10-21
 set -euo pipefail
 
 progname=${0##*/}
@@ -430,6 +430,29 @@ function push_line(s) {
     ln[sdepth, ns[sdepth]] = s
 }
 
+function loop_render_line(line,   expr, cond, yes, no, rest, out, ipos, ilen, epos, elen) {
+    if (match(line, /\{%[[:space:]]*if[[:space:]]+[^%]+%\}/)) {
+        ipos = RSTART; ilen = RLENGTH
+        expr = substr(line, ipos, ilen)
+        sub(/^\{%[[:space:]]*if[[:space:]]+/, "", expr)
+        sub(/[[:space:]]*%\}$/, "", expr)
+        cond = cond_eval(expr)
+        out = substr(line, 1, ipos-1)
+        rest = substr(line, ipos+ilen)
+        if (match(rest, /\{%[[:space:]]*else[[:space:]]*%\}/)) {
+            epos = RSTART; elen = RLENGTH
+            yes = substr(rest, 1, epos-1)
+            no = substr(rest, epos+elen)
+            sub(/\{%[[:space:]]*endif[[:space:]]*%\}.*$/, "", no)
+            out = out (cond ? yes : no)
+        } else {
+            sub(/\{%[[:space:]]*endif[[:space:]]*%\}.*$/, "", rest)
+            if (cond) out = out rest
+        }
+        return render(out)
+    }
+    return render(line)
+}
 function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
                               list, cnt, bi, k, saved_n, expr, cond,
                               was_active, rendered, acc, acc_ok,
@@ -438,6 +461,12 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
     acc_ok = cur_active()
     while (line != "") {
         kind = tag_kind_at(line)
+        if (sdepth > 0 && kind_sd[sdepth] == "for" && (kind == "if" || kind == "elif" || kind == "else" || kind == "endif")) {
+            ns[sdepth]++
+            ln[sdepth, ns[sdepth]] = line
+            loop_conditional[sdepth] = 1
+            break
+        }
         if (kind == "") {
             if (acc_ok) acc = acc line    # СЫРОЕ
             break
@@ -466,6 +495,7 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
             saved_acc[sdepth] = acc
             active[sdepth] = acc_ok
             ns[sdepth] = 0
+            loop_conditional[sdepth] = 0
             acc = ""
             acc_ok = cur_active()
             line = after
@@ -485,6 +515,7 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
             list = lv_has(listname) ? lv_get(listname) : ENVIRON[listname]
             cnt  = split_list(list)
             saved_n = ns[sdepth]
+            was_conditional = loop_conditional[sdepth]
             for (bi = 1; bi <= saved_n; bi++) saved[bi] = ln[sdepth, bi]
             was_active = active[sdepth]
             acc = saved_acc[sdepth]
@@ -497,12 +528,12 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
                     first = 1
                     iter_txt = ""
                     for (bi = 1; bi <= saved_n; bi++) {
-                        rendered = render(saved[bi])
+                        rendered = loop_render_line(saved[bi])
                         if (first) { iter_txt = rendered; first = 0 }
                         else       { iter_txt = iter_txt "\n" rendered }
                     }
                     depth--
-                    if (k > 1 && saved_n > 1) got_body = got_body "\n"
+                    if (k > 1 && (saved_n > 1 || was_conditional)) got_body = got_body "\n"
                     got_body = got_body iter_txt
                 }
                 if (acc != "") acc = acc "\n" got_body
@@ -549,7 +580,6 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
                 active[sdepth] = cond
                 if (cond) if_taken[sdepth] = 1
             }
-            if (!active[sdepth]) ns[sdepth] = 0
             line = after
             acc_ok = cur_active()
             continue
@@ -565,7 +595,6 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
             }
             if (if_taken[sdepth]) active[sdepth] = 0
             else { active[sdepth] = 1; if_taken[sdepth] = 1 }
-            if (!active[sdepth]) ns[sdepth] = 0
             line = after
             acc_ok = cur_active()
             continue
@@ -579,7 +608,7 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
             if (sdepth == 0 || kind_sd[sdepth] != "if") {
                 print "templater: {% endif %} без {% if %}" > "/dev/stderr"; exit 2
             }
-            was_active = active[sdepth]
+            was_active = if_taken[sdepth]
             acc = saved_acc[sdepth]
             sdepth--
             if (was_active) {
@@ -595,6 +624,10 @@ function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
                 }
             }
             ns[sdepth+1] = 0
+            if (sdepth > 0 && got_body != "") {
+                ns[sdepth]++
+                ln[sdepth, ns[sdepth]] = got_body
+            }
             line = after
             acc_ok = cur_active()
             continue
@@ -607,7 +640,8 @@ BEGIN { sdepth = 0; depth = 0 }
 { process_line($0) }
 END {
     if (sdepth > 0) {
-        print "templater: незакрытый блок ({% for %} или {% if %})" > "/dev/stderr"
+        if (kind_sd[sdepth] == "if") print "templater: незакрытый блок {% if %}: ожидается {% endif %}" > "/dev/stderr"
+        else print "templater: незакрытый блок {% for %}: ожидается {% endfor %}" > "/dev/stderr"
         exit 2
     }
 }
