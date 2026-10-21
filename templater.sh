@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # templater.sh
-# v 3.3.3 2026-10-10
+# v 3.4.0 2026-10-21
 set -euo pipefail
 
 progname=${0##*/}
@@ -118,7 +118,6 @@ fi
 
 awk '
 function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
-
 function shellquote(s,   r, i, c) {
     r = ""
     for (i = 1; i <= length(s); i++) {
@@ -128,7 +127,6 @@ function shellquote(s,   r, i, c) {
     }
     return "\047" r "\047"
 }
-
 function run_capture(cmd,   out, line) {
     out = ""
     if ((cmd | getline line) > 0) out = line
@@ -136,7 +134,6 @@ function run_capture(cmd,   out, line) {
     close(cmd)
     return out
 }
-
 function f_default(v, arg) { if (v == "") return unquote(arg); return v }
 function f_b64encode(v) { return run_capture("printf %s " shellquote(v) " | base64 | tr -d \047\n\047") }
 function f_b64decode(v) { return run_capture("printf %s " shellquote(v) " | base64 -d 2>/dev/null") }
@@ -146,7 +143,6 @@ function f_trim(v)  { return trim(v) }
 function f_quote(v) { return shellquote(v) }
 function f_sha256(v) { return run_capture("printf %s " shellquote(v) " | (sha256sum 2>/dev/null || shasum -a 256) | cut -d\047 \047 -f1") }
 function f_md5(v)    { return run_capture("printf %s " shellquote(v) " | (md5sum 2>/dev/null || md5) | cut -d\047 \047 -f1") }
-
 function ord(c) {
     if (!ord_init) { for (i = 0; i < 256; i++) ord_chr[sprintf("%c", i)] = i; ord_init = 1 }
     return ord_chr[c]
@@ -220,7 +216,6 @@ function apply_filter(v, f,   name, arg, p) {
     if (name == "indent")    return f_indent(v, arg)
     return v
 }
-
 function lv_set(d, name, val) { loop_name[d] = name; loop_val[d] = val }
 function lv_get(name,   i) {
     for (i = depth; i >= 1; i--)
@@ -232,36 +227,33 @@ function lv_has(name,   i) {
         if (loop_name[i] == name) return 1
     return 0
 }
-
-function split_list(s,   i, c, buf, n, in_word) {
-    n = 0; buf = ""; in_word = 0
+function split_list(s,   i, c, b, n, in_word) {
+    n = 0; b = ""; in_word = 0
     for (i = 1; i <= length(s); i++) {
         c = substr(s, i, 1)
         if (c == " " || c == "\t" || c == "\r") {
-            if (in_word) { items[++n] = buf; buf = ""; in_word = 0 }
-        } else { buf = buf c; in_word = 1 }
+            if (in_word) { items[++n] = b; b = ""; in_word = 0 }
+        } else { b = b c; in_word = 1 }
     }
-    if (in_word) items[++n] = buf
+    if (in_word) items[++n] = b
     return n
 }
-
-function find_ph(line,   i, c, depth2, start, p, rest) {
+function find_ph(line,   i, d2, start, p, rest) {
     start = index(line, "{{")
     if (start == 0) { RSTART = 0; RLENGTH = 0; return 0 }
     rest = substr(line, start+2)
-    depth2 = 1; i = 1; p = 0
+    d2 = 1; i = 1; p = 0
     while (i <= length(rest)) {
-        if (substr(rest, i, 2) == "{{") { depth2++; i += 2; continue }
-        if (substr(rest, i, 2) == "}}") { depth2--; if (depth2 == 0) { p = i; break }; i += 2; continue }
+        if (substr(rest, i, 2) == "{{") { d2++; i += 2; continue }
+        if (substr(rest, i, 2) == "}}") { d2--; if (d2 == 0) { p = i; break }; i += 2; continue }
         i++
     }
     if (p == 0) { RSTART = 0; RLENGTH = 0; return 0 }
     RSTART = start
-    RLENGTH = (start + 2 + p + 1) - start   # от {{ до }} включительно
+    RLENGTH = (start + 2 + p + 1) - start
     return 1
 }
-
-function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2, inner) {
+function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2, inner, ipos, ilen) {
     out = ""
     while (find_ph(line)) {
         pre  = substr(line, 1, RSTART-1)
@@ -270,23 +262,19 @@ function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2, in
         body = ph
         sub(/^\{\{[[:space:]]*/, "", body)
         sub(/[[:space:]]*\}\}$/, "", body)
-
-        # развернуть вложенные {{ var }} внутри имени
         while (match(body, /\{\{[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\}\}/)) {
-            inner = substr(body, RSTART+2, RLENGTH-4)
+            ipos = RSTART; ilen = RLENGTH
+            inner = substr(body, ipos+2, ilen-4)
             gsub(/[[:space:]]/, "", inner)
             if (lv_has(inner)) v = lv_get(inner)
             else               v = ENVIRON[inner]
-            body = substr(body, 1, RSTART-1) v substr(body, RSTART+RLENGTH)
+            body = substr(body, 1, ipos-1) v substr(body, ipos+ilen)
         }
-
         name = body
         sub(/[[:space:]]*\|.*$/, "", name)
         name = trim(name)
-
         if (lv_has(name)) v = lv_get(name)
         else              v = ENVIRON[name]
-
         rest = body
         sub(/^[^|]*/, "", rest)
         while (rest ~ /\|/) {
@@ -308,119 +296,318 @@ function render(line,   out, pre, ph, post, body, name, rest, v, f, j, c, d2, in
     return out line
 }
 
-function render_block(text,   r) {
-    r = render(text)
-    sub(/\n$/, "", r)
-    return r
+# --- условия ---
+function cond_operand(tok,   t, name) {
+    t = trim(tok)
+    if (t ~ /^\047.*\047$/) { sub(/^\047/, "", t); sub(/\047$/, "", t); return t }
+    if (t ~ /^".*"$/)       { sub(/^"/, "", t);   sub(/"$/, "", t);   return t }
+    if (t == "true")  return "1"
+    if (t == "false") return ""
+    if (t == "empty") return ""
+    if (t ~ /^-?[0-9]+(\.[0-9]+)?$/) return t
+    name = t
+    if (lv_has(name)) return lv_get(name)
+    if (name in ENVIRON) return ENVIRON[name]
+    return ""
+}
+function cond_is_defined(name) {
+    if (lv_has(name)) return 1
+    if (name in ENVIRON) return 1
+    return 0
+}
+function find_top_op(e, op,   i, c, d, q, ol, before, after) {
+    d = 0; q = ""
+    ol = length(op)
+    for (i = 1; i <= length(e) - ol + 1; i++) {
+        c = substr(e, i, 1)
+        if (q != "") { if (c == q) q = ""; continue }
+        if (c == "\047" || c == "\"") { q = c; continue }
+        if (c == "(") { d++; continue }
+        if (c == ")") { d--; continue }
+        if (d != 0) continue
+        if (substr(e, i, ol) == op) {
+            if (op ~ /^[a-z]+$/) {
+                before = (i == 1) ? " " : substr(e, i-1, 1)
+                after  = (i+ol > length(e)) ? " " : substr(e, i+ol, 1)
+                if (before !~ /[[:space:]]/ || after !~ /[[:space:]]/) continue
+            }
+            return i
+        }
+    }
+    return 0
+}
+function balanced_outer(e,   i, d, c, q) {
+    d = 0; q = ""
+    for (i = 2; i < length(e); i++) {
+        c = substr(e, i, 1)
+        if (q != "") { if (c == q) q = ""; continue }
+        if (c == "\047" || c == "\"") { q = c; continue }
+        if (c == "(") d++
+        else if (c == ")") { d--; if (d < 0) return 0 }
+    }
+    return (d == 0)
+}
+function cond_eval(expr,   e, p, left, right, op, name, isnot, kind, r, parts, l) {
+    e = trim(expr)
+    if (e == "") return 0
+    p = find_top_op(e, "or")
+    if (p > 0) return cond_eval(substr(e,1,p-1)) || cond_eval(substr(e,p+2))
+    p = find_top_op(e, "and")
+    if (p > 0) return cond_eval(substr(e,1,p-1)) && cond_eval(substr(e,p+3))
+    if (match(e, /^not[[:space:]]+/))
+        return !cond_eval(substr(e, RLENGTH+1))
+    if (e ~ /^\(.*\)$/ && balanced_outer(e))
+        return cond_eval(substr(e, 2, length(e)-2))
+    if (match(e, /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]+is[[:space:]]+(not[[:space:]]+)?(defined|empty)$/)) {
+        split(e, parts, /[[:space:]]+/)
+        name = parts[1]; isnot = (parts[3] == "not") ? 1 : 0
+        kind = parts[length(parts)]
+        if (kind == "defined") { r = cond_is_defined(name); return isnot ? !r : r }
+        else                  { r = (cond_operand(name) == ""); return isnot ? !r : r }
+    }
+    op = ""; p = 0
+    if ((p = find_top_op(e, "==")) > 0) op = "=="
+    else if ((p = find_top_op(e, "!=")) > 0) op = "!="
+    else if ((p = find_top_op(e, ">=")) > 0) op = ">="
+    else if ((p = find_top_op(e, "<=")) > 0) op = "<="
+    else if ((p = find_top_op(e, ">"))  > 0) op = ">"
+    else if ((p = find_top_op(e, "<"))  > 0) op = "<"
+    if (op != "") {
+        left  = cond_operand(substr(e, 1, p-1))
+        right = cond_operand(substr(e, p+length(op)))
+        if (left ~ /^-?[0-9]+(\.[0-9]+)?$/ && right ~ /^-?[0-9]+(\.[0-9]+)?$/) {
+            l = left+0
+            if (op == "==") return l == right+0
+            if (op == "!=") return l != right+0
+            if (op == ">=") return l >= right+0
+            if (op == "<=") return l <= right+0
+            if (op == ">")  return l >  right+0
+            if (op == "<")  return l <  right+0
+        }
+        if (op == "==") return left == right
+        if (op == "!=") return left != right
+        if (op == ">=") return left >= right
+        if (op == "<=") return left <= right
+        if (op == ">")  return left >  right
+        if (op == "<")  return left <  right
+    }
+    left = cond_operand(e)
+    return (left != "" && left != "0" && left != "false")
 }
 
-function tag_kind_at(line,   kind, kpos, klen) {
-    kind = ""; kpos = 0; klen = 0
+function tag_kind_at(line,   k, kpos, klen) {
+    k = ""; kpos = 0; klen = 0
     if (match(line, /\{%[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*%\}/)) {
-        kind = "for"; kpos = RSTART; klen = RLENGTH
+        k = "for"; kpos = RSTART; klen = RLENGTH
     }
     if (match(line, /\{%[[:space:]]*endfor[[:space:]]*%\}/)) {
-        if (kpos == 0 || RSTART < kpos) { kind = "endfor"; kpos = RSTART; klen = RLENGTH }
+        if (kpos == 0 || RSTART < kpos) { k = "endfor"; kpos = RSTART; klen = RLENGTH }
+    }
+    if (match(line, /\{%[[:space:]]*if[[:space:]]+[^%]+%\}/)) {
+        if (kpos == 0 || RSTART < kpos) { k = "if"; kpos = RSTART; klen = RLENGTH }
+    }
+    if (match(line, /\{%[[:space:]]*elif[[:space:]]+[^%]+%\}/)) {
+        if (kpos == 0 || RSTART < kpos) { k = "elif"; kpos = RSTART; klen = RLENGTH }
+    }
+    if (match(line, /\{%[[:space:]]*else[[:space:]]*%\}/)) {
+        if (kpos == 0 || RSTART < kpos) { k = "else"; kpos = RSTART; klen = RLENGTH }
+    }
+    if (match(line, /\{%[[:space:]]*endif[[:space:]]*%\}/)) {
+        if (kpos == 0 || RSTART < kpos) { k = "endif"; kpos = RSTART; klen = RLENGTH }
     }
     pos = kpos; len = klen
-    return kind
+    return k
 }
 
-function process_line(line,   out, kind, tag, forvar, listname, head, after,
-                              before, list, cnt, body, acc, k, rendered,
-                              p, ii, sep) {
-    out = ""
+function cur_active(   i) {
+    for (i = 1; i <= sdepth; i++) if (!active[i]) return 0
+    return 1
+}
+# На уровне 0 — рендерим сразу; внутри блока — сохраняем СЫРОЕ.
+function push_line(s) {
+    if (sdepth == 0) { print render(s); return }
+    ns[sdepth]++
+    ln[sdepth, ns[sdepth]] = s
+}
+
+function process_line(line,   kind, tag, head, after, p, ii, forvar, listname,
+                              list, cnt, bi, k, saved_n, expr, cond,
+                              was_active, rendered, acc, acc_ok,
+                              iter_txt, got_body, first) {
+    acc = ""
+    acc_ok = cur_active()
     while (line != "") {
         kind = tag_kind_at(line)
         if (kind == "") {
-            if (depth > 0) for_body[depth] = for_body[depth] line "\n"
-            else           out = out render(line)
+            if (acc_ok) acc = acc line    # СЫРОЕ
             break
         }
+        head  = substr(line, 1, pos-1)
+        tag   = substr(line, pos, len)
+        after = substr(line, pos + len)
 
         if (kind == "for") {
-            tag = substr(line, pos, len)
+            if (head != "" && acc_ok) acc = acc head
             gsub(/\{%[[:space:]]*for[[:space:]]+/, "", tag)
             gsub(/[[:space:]]*%\}/, "", tag)
             tag = trim(tag)
             p = 0
-            for (ii = 1; ii <= length(tag) - 3; ii++) {
+            for (ii = 1; ii <= length(tag) - 3; ii++)
                 if (substr(tag, ii, 4) == " in ") { p = ii; break }
-            }
             if (p == 0) {
-                print "templater: некорректный {% for %}: " tag > "/dev/stderr"
-                exit 2
+                print "templater: некорректный {% for %}: " tag > "/dev/stderr"; exit 2
             }
             forvar   = trim(substr(tag, 1, p-1))
             listname = trim(substr(tag, p+4))
-
-            head  = substr(line, 1, pos-1)
-            after = substr(line, pos + len)
-
-            if (head != "") {
-                if (depth > 0) for_body[depth] = for_body[depth] head "\n"
-                else           out = out render(head)
-            }
-
-            depth++
-            for_name[depth] = forvar
-            for_list[depth] = listname
-            for_body[depth] = ""
-            if (after != "") {
-                if (after ~ /\{%[[:space:]]*endfor[[:space:]]*%\}/) {
-                    line = after
-                    continue
-                }
-                for_body[depth] = after
-            }
-            if (out != "") print out
-            return
+            sdepth++
+            kind_sd[sdepth] = "for"
+            for_name[sdepth] = forvar
+            for_list[sdepth] = listname
+            saved_acc[sdepth] = acc
+            active[sdepth] = acc_ok
+            ns[sdepth] = 0
+            acc = ""
+            acc_ok = cur_active()
+            line = after
+            continue
         }
 
         if (kind == "endfor") {
-            if (depth == 0) {
-                print "templater: {% endfor %} без {% for %}" > "/dev/stderr"
-                exit 2
+            if (head != "" && cur_active() && active[sdepth]) {
+                ns[sdepth]++
+                ln[sdepth, ns[sdepth]] = head     # СЫРОЕ
             }
-            before = substr(line, 1, pos-1)
-            after  = substr(line, pos + len)
-            if (before != "") for_body[depth] = for_body[depth] before
-
-            listname = for_list[depth]
+            if (sdepth == 0 || kind_sd[sdepth] != "for") {
+                print "templater: {% endfor %} без {% for %}" > "/dev/stderr"; exit 2
+            }
+            forvar = for_name[sdepth]
+            listname = for_list[sdepth]
             list = lv_has(listname) ? lv_get(listname) : ENVIRON[listname]
             cnt  = split_list(list)
-            body = for_body[depth]
-            forvar = for_name[depth]
-
-            acc = ""
-            sep = (body ~ /\n/) ? "\n" : ""
-            for (k = 1; k <= cnt; k++) {
-                lv_set(depth, forvar, items[k])
-                rendered = render_block(body)
-                if (k > 1) acc = acc sep
-                acc = acc rendered
+            saved_n = ns[sdepth]
+            for (bi = 1; bi <= saved_n; bi++) saved[bi] = ln[sdepth, bi]
+            was_active = active[sdepth]
+            acc = saved_acc[sdepth]
+            sdepth--
+            if (was_active && cnt > 0) {
+                got_body = ""
+                for (k = 1; k <= cnt; k++) {
+                    depth++
+                    lv_set(depth, forvar, items[k])
+                    first = 1
+                    iter_txt = ""
+                    for (bi = 1; bi <= saved_n; bi++) {
+                        rendered = render(saved[bi])
+                        if (first) { iter_txt = rendered; first = 0 }
+                        else       { iter_txt = iter_txt "\n" rendered }
+                    }
+                    depth--
+                    if (k > 1 && saved_n > 1) got_body = got_body "\n"
+                    got_body = got_body iter_txt
+                }
+                if (acc != "") acc = acc "\n" got_body
+                else           acc = got_body
             }
-
-            depth--
-            if (depth > 0) for_body[depth] = for_body[depth] acc "\n"
-            else           out = out acc
-
             line = after
-            if (line == "") {
-                if (out != "") print out
-                return
+            acc_ok = cur_active()
+            continue
+        }
+
+        if (kind == "if") {
+            if (head != "" && acc_ok) acc = acc head
+            expr = tag
+            sub(/^\{%[[:space:]]*if[[:space:]]+/, "", expr)
+            sub(/[[:space:]]*%\}$/, "", expr)
+            sdepth++
+            kind_sd[sdepth] = "if"
+            cond = cond_eval(expr)
+            if_taken[sdepth] = cond
+            saved_acc[sdepth] = acc
+            active[sdepth] = cond
+            ns[sdepth] = 0
+            acc = ""
+            acc_ok = cur_active()
+            line = after
+            continue
+        }
+
+        if (kind == "elif") {
+            if (head != "" && cur_active() && active[sdepth]) {
+                ns[sdepth]++
+                ln[sdepth, ns[sdepth]] = head
             }
+            if (sdepth == 0 || kind_sd[sdepth] != "if") {
+                print "templater: {% elif %} без {% if %}" > "/dev/stderr"; exit 2
+            }
+            expr = tag
+            sub(/^\{%[[:space:]]*elif[[:space:]]+/, "", expr)
+            sub(/[[:space:]]*%\}$/, "", expr)
+            if (if_taken[sdepth]) {
+                active[sdepth] = 0
+            } else {
+                cond = cond_eval(expr)
+                active[sdepth] = cond
+                if (cond) if_taken[sdepth] = 1
+            }
+            if (!active[sdepth]) ns[sdepth] = 0
+            line = after
+            acc_ok = cur_active()
+            continue
+        }
+
+        if (kind == "else") {
+            if (head != "" && cur_active() && active[sdepth]) {
+                ns[sdepth]++
+                ln[sdepth, ns[sdepth]] = head
+            }
+            if (sdepth == 0 || kind_sd[sdepth] != "if") {
+                print "templater: {% else %} без {% if %}" > "/dev/stderr"; exit 2
+            }
+            if (if_taken[sdepth]) active[sdepth] = 0
+            else { active[sdepth] = 1; if_taken[sdepth] = 1 }
+            if (!active[sdepth]) ns[sdepth] = 0
+            line = after
+            acc_ok = cur_active()
+            continue
+        }
+
+        if (kind == "endif") {
+            if (head != "" && cur_active() && active[sdepth]) {
+                ns[sdepth]++
+                ln[sdepth, ns[sdepth]] = head
+            }
+            if (sdepth == 0 || kind_sd[sdepth] != "if") {
+                print "templater: {% endif %} без {% if %}" > "/dev/stderr"; exit 2
+            }
+            was_active = active[sdepth]
+            acc = saved_acc[sdepth]
+            sdepth--
+            if (was_active) {
+                first = 1
+                got_body = ""
+                for (bi = 1; bi <= ns[sdepth+1]; bi++) {
+                    if (first) { got_body = ln[sdepth+1, bi]; first = 0 }
+                    else       { got_body = got_body "\n" ln[sdepth+1, bi] }
+                }
+                if (got_body != "") {
+                    if (acc != "") acc = acc "\n" got_body
+                    else           acc = got_body
+                }
+            }
+            ns[sdepth+1] = 0
+            line = after
+            acc_ok = cur_active()
             continue
         }
     }
-    if (out != "") print out
+    if (acc != "") push_line(acc)
 }
 
-BEGIN { depth = 0 }
+BEGIN { sdepth = 0; depth = 0 }
 { process_line($0) }
 END {
-    if (depth > 0) {
-        print "templater: {% for %} без {% endfor %}" > "/dev/stderr"
+    if (sdepth > 0) {
+        print "templater: незакрытый блок ({% for %} или {% if %})" > "/dev/stderr"
         exit 2
     }
 }

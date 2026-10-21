@@ -1,5 +1,9 @@
 app: {{ APP_NAME | upper }}
 greeting: {{ GREETING | default('hello') | quote }}
 url: https://example.com/?q={{ GREETING | urlencode }}
+{% if SECRET is defined %}
 token: {{ SECRET | b64encode }}
 token_sha256: {{ SECRET | sha256 }}
+{% else %}
+token: null
+{% endif %}

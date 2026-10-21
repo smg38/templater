@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test/run.sh — минимальный раннер без bats
-# v 3.3.3, 2026-10-10
+# v 3.4.0, 2026-10-21
 # Автор: @smg38
 set -uo pipefail
 
@@ -100,6 +100,14 @@ run_case "loop-dynname" \
         uuid: "{{ UUID_A_{{ user }} }}"
         flow: {{ FLOW_USERS }}
 {% endfor %}'
+# --- условия ---
+run_case "if-true"       "P"    ENV=prod -- '{% if ENV == "prod" %}P{% endif %}'
+run_case "if-false"      "AB"   ENV=dev  -- 'A{% if ENV == "prod" %}P{% endif %}B'
+run_case "if-else"       "D"    ENV=dev  -- '{% if ENV == "prod" %}P{% else %}D{% endif %}'
+run_case "if-elif"       "S"    ENV=stg  -- '{% if ENV == "prod" %}P{% elif ENV == "stg" %}S{% endif %}'
+run_case "if-num"        "ok"   PORT=8080 -- '{% if PORT > 1024 %}ok{% endif %}'
+run_case "if-defined"    "has"  SECRET=x -- '{% if SECRET is defined %}has{% endif %}'
+run_case "if-notdef"     "none" A=1      -- '{% if MISSING is not defined %}none{% endif %}'
 # --- .env / автопоиск ---
 test_env() {
     local name=$1 expected=$2 envbody=$3 script=$4
