@@ -63,6 +63,27 @@ teardown() { cd /; rm -rf "$WORK"; }
     [ ! -f out ]
 }
 
+@test "-c removes trailing spaces, comment lines, and blank lines" {
+    cat > file.j3 <<'EOF'
+  # comment
+key: value
+
+    # another comment
+inline: value # kept
+EOF
+    run bash "$SCRIPT" -c -o - file.j3
+    [ "$status" -eq 0 ]
+    [ "$output" = "key: value
+inline: value # kept" ]
+}
+
+@test "-c cleans generated output files" {
+    printf 'key: value   \n\n' > file.j3
+    run bash "$SCRIPT" -c file.j3
+    [ "$status" -eq 0 ]
+    [ "$(cat file.out)" = "key: value" ]
+}
+
 @test "there is no .env nearby - variables are taken only from the environment" {
     printf '%s\n' 'A={{ FOO | default("n/a") }}' > file.j3
     rm -f file.env file.out

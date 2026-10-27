@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test/run.sh — минимальный раннер без bats
-# v 3.4.1, 2026-10-21
+# v 3.4.2, 2026-10-27
 # Автор: @smg38
 set -uo pipefail
 
@@ -75,6 +75,8 @@ run_case "hexdump"                "4142"                     A=AB -- '{{ A | hex
 run_case "two-in-line"            "A=1 B=2"                  A=1 B=2 -- 'A={{ A }} B={{ B }}'
 run_case "value-with-ampersand"   "A=foo&bar"                A='foo&bar' -- 'A={{ A }}'
 run_case "value-with-slash-and-brace" 'A=/a\b{c}'            A='/a\b{c}' -- 'A={{ A }}'
+run_case "clean-output" $'key: value\ninline: value # kept' -- \
+    $'  # comment  \nkey: value   \n\n  # another comment\ninline: value # kept\n' -c
 
 # --- циклы ---
 run_case "loop-space"   "a;b;c;"  USERS="a b c"        -- '{% for u in USERS %}{{ u }};{% endfor %}'

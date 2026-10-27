@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # templater.sh
-# v 3.4.1 2026-10-21
+# v 3.4.2 2026-10-27
 set -euo pipefail
 
 progname=${0##*/}
 
 usage() {
     cat >&2 <<'EOF'
-Usage: VAR=value templater [-e ENVFILE] [-o OUTPUT] [-s] TEMPLATE
-       VAR=value templater [-e ENVFILE] [-o OUTPUT] [-s] -
+Usage: VAR=value templater [-e ENVFILE] [-o OUTPUT] [-c] [-s] TEMPLATE
+       VAR=value templater [-e ENVFILE] [-o OUTPUT] [-c] [-s] -
 
 Behavior:
   If TEMPLATE is 'file.j3' and no -e is given, variables are loaded
@@ -19,6 +19,7 @@ Behavior:
 Options:
   -e ENVFILE  загрузить переменные из ENVFILE (можно несколько раз)
   -o OUTPUT   записать результат в OUTPUT
+  -c          очистить вывод: убрать завершающие пробелы, комментарии и пустые строки
   -s          strict: ошибка на неопределённую переменную без default
   -h          справка
 
@@ -34,16 +35,25 @@ Loops:
   LIST — переменная окружения; элементы разделены пробелами,
   табами или переводами каретки (один или несколько).
   Внутри тела доступны все переменные и фильтры.
+
+Conditions:
+  {% if CONDITION %}
+    ...
+  {% elif CONDITION %} ... {% else %} ... {% endif %}
+  Операторы: ==, !=, >, <, >=, <=, and, or, not,
+  is defined, is not defined, is empty.
+  Условия можно вкладывать и использовать внутри циклов.
 EOF
     exit 1
 }
 
-strict=0; outfile=""; outfile_given=0; envfile=(); envfile_given=0; template=""
+strict=0; clean=0; outfile=""; outfile_given=0; envfile=(); envfile_given=0; template=""
 
-while getopts ":e:o:sh" opt; do
+while getopts ":e:o:csh" opt; do
     case $opt in
         e) envfiles+=("$OPTARG"); envfile_given=1 ;;
         o) outfile=$OPTARG; outfile_given=1 ;;
+        c) clean=1 ;;
         s) strict=1 ;;
         h) usage ;;
         \?) echo "$progname: неизвестная опция -$OPTARG" >&2; usage ;;
@@ -90,8 +100,9 @@ for envfile in ${envfiles[@]+"${envfiles[@]}"}; do
     done < "$envfile"
 done
 
+render_tmp=""
 if [[ "$template" == "-" ]]; then
-    tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
+    tmp=$(mktemp); trap 'rm -f "${tmp:-}" "${render_tmp:-}"' EXIT
     cat > "$tmp"; template=$tmp
 elif [[ ! -f "$template" ]]; then
     echo "$progname: файл '$template' не найден" >&2; exit 1
@@ -114,6 +125,14 @@ if (( strict )); then
         fi
     done
     (( ${#missing[@]} )) && { printf '%s: не определены переменные: %s\n' "$progname" "${missing[*]}" >&2; exit 2; }
+fi
+
+if (( clean )); then
+    render_tmp=$(mktemp)
+    trap 'rm -f "${tmp:-}" "${render_tmp:-}"' EXIT
+    render_target=$render_tmp
+else
+    render_target=$target
 fi
 
 awk '
@@ -645,4 +664,14 @@ END {
         exit 2
     }
 }
-' "$template" > "$target"
+' "$template" > "$render_target"
+
+if (( clean )); then
+    awk '
+        {
+            sub(/[[:space:]]+$/, "")
+            if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) next
+            print
+        }
+    ' "$render_tmp" > "$target"
+fi
